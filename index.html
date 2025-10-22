@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COLB Game - Official Shooter</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+                'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+                sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        #root {
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function Game() {
+          const canvasRef = useRef(null);
+          const [score, setScore] = useState(0);
+          const [gameOver, setGameOver] = useState(false);
+          const [lives, setLives] = useState(3);
+          const [weaponLevel, setWeaponLevel] = useState(1);
+
+          const imagesRef = useRef({
+            player: null,
+            enemy: null,
+            coin: null,
+            bullet: null,
+            heart: null,
+            levelUp: null,
+            background: null,
+            loaded: false
+          });
+
+          const gameStateRef = useRef({
+            player: { 
+              x: 400, 
+              y: 300, 
+              width: 50, 
+              height: 50, 
+              speed: 6, 
+              lastDirection: { x: 0, y: -1 } 
+            },
+            bullets: [],
+            enemies: [],
+            coins: [],
+            hearts: [],
+            levelUps: [],
+            keys: {},
+            lastShot: 0,
+            enemySpawnTimer: 0,
+            coinSpawnTimer: 0,
+            animationId: null,
+            isGameOver: false
+          });
+
+          useEffect(() => {
+            const images = imagesRef.current;
+            
+            const playerImg = new Image();
+            playerImg.crossOrigin = 'anonymous';
+            
+            const enemyImg = new Image();
+            enemyImg.crossOrigin = 'anonymous';
+            
+            const backgroundImg = new Image();
+            backgroundImg.crossOrigin = 'anonymous';
+            
+            let loadedCount = 0;
+            const totalImages = 3;
+            
+            const onLoad = (imgType) => {
+              console.log(`✅ ${imgType} loaded successfully`);
+              loadedCount++;
+              if (loadedCount === totalImages) {
+                images.player = playerImg;
+                images.enemy = enemyImg;
+                images.background = backgroundImg;
+                images.loaded = true;
+                console.log('🎮 All images loaded! Game ready.');
+              }
+            };
+            
+            const onError = (imgType) => {
+              console.error(`❌ Failed to load ${imgType}`);
+              loadedCount++;
+              if (loadedCount === totalImages) {
+                console.log('⚠️ Some images failed, using fallback shapes');
+                images.loaded = true;
+              }
+            };
+            
+            playerImg.onload = () => onLoad('Player');
+            playerImg.onerror = () => onError('Player');
+            enemyImg.onload = () => onLoad('Enemy');
+            enemyImg.onerror = () => onError('Enemy');
+            backgroundImg.onload = () => onLoad('Background');
+            backgroundImg.onerror = () => onError('Background');
+            
+            playerImg.src = 'https://i.imgur.com/kRRIDBh.png';
+            enemyImg.src = 'https://i.imgur.com/q6KTBbz.png';
+            backgroundImg.src = 'https://i.imgur.com/VUQZTPI.jpg';
+          }, []);
+
+          useEffect(() => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const gameState = gameStateRef.current;
+            const images = imagesRef.current;
+            
+            gameState.isGameOver = false;
+            
+            const handleKeyDown = (e) => {
+              if (gameState.isGameOver) return;
+              
+              gameState.keys[e.key.toLowerCase()] = true;
+              gameState.keys[e.code] = true;
+              
+              if (e.key === ' ' || e.code === 'Space') {
+                e.preventDefault();
+                const now = Date.now();
+                if (now - gameState.lastShot > 250) {
+                  const dir = gameState.player.lastDirection;
+                  gameState.bullets.push({
+                    x: gameState.player.x + 20,
+                    y: gameState.player.y + 20,
+                    width: 10,
+                    height: 20,
+                    vx: dir.x * 10,
+                    vy: dir.y * 10,
+                    damage: weaponLevel
+                  });
+                  gameState.lastShot = now;
+                }
+              }
+            };
+
+            const handleKeyUp = (e) => {
+              gameState.keys[e.key.toLowerCase()] = false;
+              gameState.keys[e.code] = false;
+            };
+
+            window.addEventListener('keydown', handleKeyDown);
+            window.addEventListener('keyup', handleKeyUp);
+
+            const spawnEnemy = () => {
+              const side = Math.floor(Math.random() * 4);
+              const size = 40;
+              let x, y;
+              
+              switch(side) {
+                case 0: x = Math.random() * 800; y = -size; break;
+                case 1: x = 800; y = Math.random() * 600; break;
+                case 2: x = Math.random() * 800; y = 600; break;
+                default: x = -size; y = Math.random() * 600; break;
+              }
+              
+              const dx = 400 - x;
+              const dy = 300 - y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const speed = 2 + Math.random() * 2;
+              
+              gameState.enemies.push({
+                x, y, width: size, height: size, health: 3,
+                vx: (dx / dist) * speed,
+                vy: (dy / dist) * speed
+              });
+            };
+
+            const checkCollision = (a, b) => {
+              return a.x < b.x + b.width && a.x + a.width > b.x &&
+                     a.y < b.y + b.height && a.y + a.height > b.y;
+            };
+
+            const gameLoop = () => {
+              if (gameState.isGameOver || gameOver) {
+                return;
+              }
+
+              if (images.background && images.loaded) {
+                ctx.drawImage(images.background, 0, 0, 800, 600);
+              } else {
+                ctx.fillStyle = '#212121';
+                ctx.fillRect(0, 0, 800, 600);
+              }
+
+              let moving = false, dirX = 0, dirY = 0;
+              
+              if ((gameState.keys['w'] || gameState.keys['KeyW']) && gameState.player.y > 0) {
+                gameState.player.y -= 6;
+                dirY = -1;
+                moving = true;
+              }
+              if ((gameState.keys['s'] || gameState.keys['KeyS']) && gameState.player.y < 550) {
+                gameState.player.y += 6;
+                dirY = 1;
+                moving = true;
+              }
+              if ((gameState.keys['a'] || gameState.keys['KeyA']) && gameState.player.x > 0) {
+                gameState.player.x -= 6;
+                dirX = -1;
+                moving = true;
+              }
+              if ((gameState.keys['d'] || gameState.keys['KeyD']) && gameState.player.x < 750) {
+                gameState.player.x += 6;
+                dirX = 1;
+                moving = true;
+              }
+              
+              if (moving) {
+                const len = Math.sqrt(dirX * dirX + dirY * dirY);
+                if (len > 0) gameState.player.lastDirection = { x: dirX / len, y: dirY / len };
+              }
+
+              if (images.player && images.loaded) {
+                ctx.drawImage(images.player, gameState.player.x, gameState.player.y, 50, 50);
+              } else {
+                ctx.fillStyle = '#FFE41E';
+                ctx.fillRect(gameState.player.x, gameState.player.y, 50, 50);
+                ctx.fillStyle = '#212121';
+                ctx.fillRect(gameState.player.x + 12, gameState.player.y + 12, 10, 10);
+                ctx.fillRect(gameState.player.x + 28, gameState.player.y + 12, 10, 10);
+              }
+
+              gameState.bullets = gameState.bullets.filter(b => {
+                b.x += b.vx;
+                b.y += b.vy;
+                if (b.x < -50 || b.x > 850 || b.y < -50 || b.y > 650) return false;
+                
+                ctx.fillStyle = '#FFE41E';
+                ctx.fillRect(b.x, b.y, 10, 20);
+                return true;
+              });
+
+              gameState.enemySpawnTimer++;
+              if (gameState.enemySpawnTimer > 60) {
+                spawnEnemy();
+                gameState.enemySpawnTimer = 0;
+              }
+
+              gameState.enemies = gameState.enemies.filter(e => {
+                e.x += e.vx;
+                e.y += e.vy;
+
+                let hit = false;
+                gameState.bullets = gameState.bullets.filter(b => {
+                  if (checkCollision(b, e)) {
+                    e.health -= b.damage;
+                    hit = true;
+                    return false;
+                  }
+                  return true;
+                });
+
+                if (e.health <= 0) {
+                  setScore(s => s + 10);
+                  if (Math.random() < 0.15 && weaponLevel < 3) {
+                    gameState.levelUps.push({ x: e.x, y: e.y, width: 35, height: 35 });
+                  } else if (Math.random() < 0.10) {
+                    gameState.hearts.push({ x: e.x, y: e.y, width: 30, height: 30 });
+                  }
+                  return false;
+                }
+
+                if (checkCollision(e, gameState.player) && !gameState.isGameOver) {
+                  const newLives = lives - 1;
+                  setLives(newLives);
+                  
+                  if (newLives <= 0) {
+                    gameState.isGameOver = true;
+                    setGameOver(true);
+                  }
+                  
+                  return false;
+                }
+
+                if (e.x < -100 || e.x > 900 || e.y < -100 || e.y > 700) return false;
+
+                if (images.enemy && images.loaded) {
+                  ctx.drawImage(images.enemy, e.x, e.y, 40, 40);
+                } else {
+                  ctx.fillStyle = hit ? '#666666' : '#FFFFFF';
+                  ctx.fillRect(e.x, e.y, 40, 40);
+                  ctx.fillStyle = '#212121';
+                  ctx.fillRect(e.x + 8, e.y + 10, 8, 8);
+                  ctx.fillRect(e.x + 24, e.y + 10, 8, 8);
+                }
+                
+                ctx.fillStyle = '#FFE41E';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'center';
+                ctx.strokeStyle = '#212121';
+                ctx.lineWidth = 3;
+                ctx.strokeText(e.health, e.x + 20, e.y - 5);
+                ctx.fillText(e.health, e.x + 20, e.y - 5);
+                
+                return true;
+              });
+
+              gameState.coinSpawnTimer++;
+              if (gameState.coinSpawnTimer > 120 && gameState.coins.length < 5) {
+                gameState.coins.push({
+                  x: Math.random() * 770,
+                  y: Math.random() * 570,
+                  width: 30,
+                  height: 30
+                });
+                gameState.coinSpawnTimer = 0;
+              }
+
+              gameState.coins = gameState.coins.filter(c => {
+                if (checkCollision(c, gameState.player)) {
+                  setScore(s => s + 50);
+                  return false;
+                }
+                
+                ctx.fillStyle = '#FFE41E';
+                ctx.beginPath();
+                ctx.arc(c.x + 15, c.y + 15, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#212121';
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('$', c.x + 15, c.y + 22);
+                return true;
+              });
+
+              gameState.hearts = gameState.hearts.filter(h => {
+                if (checkCollision(h, gameState.player)) {
+                  setLives(l => Math.min(l + 1, 5));
+                  return false;
+                }
+                
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.arc(h.x + 10, h.y + 10, 8, 0, Math.PI * 2);
+                ctx.arc(h.x + 20, h.y + 10, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(h.x + 5, h.y + 12);
+                ctx.lineTo(h.x + 15, h.y + 25);
+                ctx.lineTo(h.x + 25, h.y + 12);
+                ctx.fill();
+                
+                ctx.strokeStyle = '#FFE41E';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                return true;
+              });
+
+              gameState.levelUps = gameState.levelUps.filter(l => {
+                if (checkCollision(l, gameState.player)) {
+                  setWeaponLevel(w => Math.min(w + 1, 3));
+                  return false;
+                }
+                
+                ctx.fillStyle = '#FFE41E';
+                ctx.beginPath();
+                ctx.moveTo(l.x + 17.5, l.y);
+                ctx.lineTo(l.x + 27, l.y + 12);
+                ctx.lineTo(l.x + 17.5, l.y + 35);
+                ctx.lineTo(l.x + 8, l.y + 12);
+                ctx.closePath();
+                ctx.fill();
+                
+                ctx.fillStyle = '#212121';
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('↑', l.x + 17.5, l.y + 25);
+                return true;
+              });
+
+              if (!gameState.isGameOver) {
+                gameState.animationId = requestAnimationFrame(gameLoop);
+              }
+            };
+
+            gameState.animationId = requestAnimationFrame(gameLoop);
+
+            return () => {
+              window.removeEventListener('keydown', handleKeyDown);
+              window.removeEventListener('keyup', handleKeyUp);
+              
+              if (gameState.animationId) {
+                cancelAnimationFrame(gameState.animationId);
+                gameState.animationId = null;
+              }
+              
+              gameState.isGameOver = true;
+            };
+          }, [gameOver, weaponLevel, lives]);
+
+          const restartGame = () => {
+            setScore(0);
+            setLives(3);
+            setWeaponLevel(1);
+            setGameOver(false);
+            
+            gameStateRef.current = {
+              player: { 
+                x: 400, 
+                y: 300, 
+                width: 50, 
+                height: 50, 
+                speed: 6, 
+                lastDirection: { x: 0, y: -1 } 
+              },
+              bullets: [],
+              enemies: [],
+              coins: [],
+              hearts: [],
+              levelUps: [],
+              keys: {},
+              lastShot: 0,
+              enemySpawnTimer: 0,
+              coinSpawnTimer: 0,
+              animationId: null,
+              isGameOver: false
+            };
+          };
+
+          return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-4" style={{ backgroundColor: '#212121' }}>
+              <div className="mb-4 flex gap-4 text-lg font-bold">
+                <div className="px-6 py-2 rounded-lg" style={{ backgroundColor: '#FFE41E', color: '#212121' }}>
+                  Score: {score}
+                </div>
+                <div className="px-6 py-2 rounded-lg" style={{ backgroundColor: '#FFFFFF', color: '#212121' }}>
+                  Lives: {lives}
+                </div>
+                <div className="px-6 py-2 rounded-lg" style={{ backgroundColor: '#FFE41E', color: '#212121' }}>
+                  Level: {weaponLevel}
+                </div>
+              </div>
+              
+              <div className="relative">
+                <canvas
+                  ref={canvasRef}
+                  width={800}
+                  height={600}
+                  className="rounded-lg"
+                  style={{ border: '4px solid #FFE41E' }}
+                />
+                
+                {gameOver && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg" 
+                       style={{ backgroundColor: 'rgba(33, 33, 33, 0.95)' }}>
+                    <h2 className="text-5xl font-bold mb-4" style={{ color: '#FFE41E' }}>
+                      GAME OVER
+                    </h2>
+                    <p className="text-3xl mb-6" style={{ color: '#FFFFFF' }}>
+                      Final Score: {score}
+                    </p>
+                    <button
+                      onClick={restartGame}
+                      className="font-bold py-3 px-8 rounded-lg text-xl transition-transform hover:scale-105"
+                      style={{ backgroundColor: '#FFE41E', color: '#212121' }}
+                    >
+                      PLAY AGAIN
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 text-center p-4 rounded-lg max-w-2xl" style={{ backgroundColor: '#FFFFFF' }}>
+                <h3 className="font-bold text-xl mb-2" style={{ color: '#212121' }}>
+                  CONTROLS
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm" style={{ color: '#212121' }}>
+                  <div>
+                    <p className="font-semibold">W/A/S/D - Move</p>
+                    <p className="font-semibold">SPACE - Shoot</p>
+                  </div>
+                  <div>
+                    <p>Yellow Coins: +50 points</p>
+                    <p>White Hearts: +1 life</p>
+                    <p>Yellow Stars: Upgrade weapon</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3" style={{ borderTop: '2px solid #FFE41E' }}>
+                  <p className="text-xs" style={{ color: '#212121' }}>
+                    Level 1: 3 shots | Level 2: 2 shots | Level 3: 1 shot
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Game />);
+    </script>
+</body>
+</html>
